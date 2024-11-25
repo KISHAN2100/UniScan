@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1079865597490",
+    "project_id": "uniscan-aa19a",
+    "storage_bucket": "uniscan-aa19a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1079865597490:android:3941ad35c513f58632e62b",
+        "android_client_info": {
+          "package_name": "com.trial"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUwPBOzGk3P7Pc5ZToPZ3sJ6u6weCOMCE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
