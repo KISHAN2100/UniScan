@@ -10,12 +10,35 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-
+import DocumentPicker from 'react-native-document-picker';
+import { Camera,useCameraDevice } from 'react-native-vision-camera';
+import { useState } from 'react';
+import { useEffect } from 'react';
 interface HomeScreenProps {
   onNavigateToHistory: () => void;
 }
 
+
+
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToHistory }) => {
+ 
+  const handlePDFUplod = async ()=> {
+    try{
+      const res = await DocumentPicker.pick({
+        type: [DocumentPicker.types.pdf],
+      });
+      console.log('Selected PDF: ', res);
+      Alert.alert('PDF Uploaded', `You selected ${res[0].name}`);
+  }catch(err){
+    if(DocumentPicker.isCancel(err)){
+  console.log('User cancelled the picker');
+    }else{
+      console.error(err);
+      Alert.alert('Error', 'An error occurred while picking the file.');
+    }
+  }
+  }
+
   const handleCameraScan = async () => {
     try {
       if (Platform.OS === 'android') {
@@ -27,6 +50,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToHistory }) => {
       Alert.alert('Error', 'Unable to open camera. Please check your camera app.');
     }
   };
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -49,7 +73,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToHistory }) => {
 
           <TouchableOpacity 
             style={[styles.actionButton, styles.uploadButton]}
-            onPress={() => Alert.alert('Upload', 'PDF upload coming soon!')}
+            onPress={(handlePDFUplod) }
           >
             <Text style={styles.actionEmoji}>📄</Text>
             <Text style={styles.actionButtonText}>Import PDF</Text>

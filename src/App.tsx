@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, SafeAreaView } from 'react-native';
+import { View, StyleSheet, SafeAreaView, TouchableOpacity, Text } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
@@ -48,6 +48,19 @@ const App: React.FC = () => {
       <View style={styles.screenContainer}>
         {renderScreen()}
       </View>
+      {currentScreen !== 'splash' && (
+        <View style={styles.navBar}>
+          <TouchableOpacity onPress={() => setCurrentScreen('home')} style={styles.navItem}>
+            <Text style={styles.navText}>🏠 Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setCurrentScreen('history')} style={styles.navItem}>
+            <Text style={styles.navText}>📄 Recent</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setCurrentScreen('profile')} style={styles.navItem}>
+            <Text style={styles.navText}>👤 Profile</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -59,6 +72,24 @@ const styles = StyleSheet.create({
   },
   screenContainer: {
     flex: 1,
+  },
+  navBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    height: 60,
+    backgroundColor: '#2C3E50',
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navText: {
+    color: '#FFF',
+    fontSize: 16,
   },
 });
 
