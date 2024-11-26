@@ -5,6 +5,9 @@ import HistoryScreen from './screens/HistoryScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
 import SplashScreen from './screens/SplashScreen';
 import DocumentPicker from 'react-native-document-picker';
+import { createStackNavigator } from '@react-navigation/stack';
+const Stack = createStackNavigator();
+
 
 const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<'splash' | 'home' | 'history' | 'profile'>('splash');
@@ -41,6 +44,13 @@ const App: React.FC = () => {
       default:
         return null;
     }
+    const [user, setUser] = useState<any>(null);
+    const handleLogin = async (email: string, password: string) => {
+        setUser(email);
+    };
+    const handleSignUp = async (email: string, password: string) => {
+        setUser(email);
+    };
   };
 
   return (

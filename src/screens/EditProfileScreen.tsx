@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { auth } from '../firebaseConfig'; // Ensure this import is correct
+import { signInWithEmailAndPassword } from 'firebase/auth'; // Correct import for signInWithEmailAndPassword
 
-const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) => void; onSignUp: (email: string, password: string) => void; }> = ({ onLogin, onSignUp }) => {
+const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) => void; onSignUp: (email: string, password: string, userDetails: any) => void; }> = ({ onLogin, onSignUp }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLogin, setIsLogin] = useState(true); // Toggle between login and signup
@@ -10,7 +12,12 @@ const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) =
     if (isLogin) {
       onLogin(email, password);
     } else {
-      onSignUp(email, password);
+      const userDetails = {
+        // Add any additional user details you want to store
+        name: 'User Name', // Example additional detail
+        // Add more fields as needed
+      };
+      onSignUp(email, password, userDetails); // Pass user details
     }
   };
 

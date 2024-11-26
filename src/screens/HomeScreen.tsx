@@ -11,9 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import DocumentPicker from 'react-native-document-picker';
-import { Camera,useCameraDevice } from 'react-native-vision-camera';
+import { Camera,useCameraDevice, useCameraDevices } from 'react-native-vision-camera';
 import { useState } from 'react';
-import { useEffect } from 'react';
 interface HomeScreenProps {
   onNavigateToHistory: () => void;
 }
