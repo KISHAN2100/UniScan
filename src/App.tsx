@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, SafeAreaView, TouchableOpacity, Text } from 'react-native';
+import { View, StyleSheet, SafeAreaView, TouchableOpacity, Text, Alert } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
 import SplashScreen from './screens/SplashScreen';
-import DocumentPicker from 'react-native-document-picker';
 import { createStackNavigator } from '@react-navigation/stack';
-const Stack = createStackNavigator();
+import { auth } from './firebaseConfig';
+import { createUserWithEmailAndPassword , signInWithEmailAndPassword} from 'firebase/auth';
 
+const Stack = createStackNavigator();
 
 const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<'splash' | 'home' | 'history' | 'profile'>('splash');
+  
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -19,6 +21,36 @@ const App: React.FC = () => {
 
     return () => clearTimeout(timer);
   }, []);
+
+ 
+  const [user, setUser] = useState<any>(null);
+
+  const handleLogin = async (email: string, password: string) => {
+    try{
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      console.log('Logged in as:', user.email);
+      setUser(user.email);
+      Alert.alert('Success','Logged in successfully!');
+    }catch(error: any){
+      console.log('login error', error.message);
+      Alert.alert('Login Failed', error.message);
+    }
+  };
+
+  const handleSignUp = async (email: string, password: string) => {
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      console.log('User registered:', user.email);
+      setUser(user.email);
+      setCurrentScreen('home');
+      Alert.alert('Success', 'Account created succesfully!');
+    } catch (error:any) {
+      console.error('Sign-up:', error.message);
+      Alert.alert('Sign-up Failed', error.message);
+    }
+  };
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -31,26 +63,13 @@ const App: React.FC = () => {
       case 'profile':
         return (
           <EditProfileScreen 
-            onLogin={(email: string, password: string) => {
-              console.log('Login:', email, password);
-              // Implement your login logic here
-            }} 
-            onSignUp={(email: string, password: string) => {
-              console.log('Sign Up:', email, password);
-              // Implement your signup logic here
-            }} 
+            onLogin={handleLogin}
+            onSignUp={handleSignUp}
           />
         );
       default:
         return null;
     }
-    const [user, setUser] = useState<any>(null);
-    const handleLogin = async (email: string, password: string) => {
-        setUser(email);
-    };
-    const handleSignUp = async (email: string, password: string) => {
-        setUser(email);
-    };
   };
 
   return (

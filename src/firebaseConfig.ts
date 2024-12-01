@@ -2,12 +2,12 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyAUwPBOzGk3P7Pc5ZToPZ3sJ6u6weCOMCE",
+  authDomain: "uniscan-aa19a.firebaseapp.com",
+  projectId: "uniscan-aa19a",
+  storageBucket: "uniscan-aa19a.appspot.com",
+  messagingSenderId: "1079865597490",
+  appId: "1:1079865597490:android:3941ad35c513f58632e62b"
 };
 
 const app = initializeApp(firebaseConfig);
