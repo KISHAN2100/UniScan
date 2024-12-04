@@ -7,8 +7,11 @@ import SplashScreen from './screens/SplashScreen';
 import { createStackNavigator } from '@react-navigation/stack';
 import { auth } from './firebaseConfig';
 import { createUserWithEmailAndPassword , signInWithEmailAndPassword} from 'firebase/auth';
+import { getFirestore, doc, setDoc } from 'firebase/firestore'; // Import Firestore functions
+import { db } from './firebaseConfig';
 
 const Stack = createStackNavigator();
+// Initialize Firestore
 
 const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<'splash' | 'home' | 'history' | 'profile'>('splash');
