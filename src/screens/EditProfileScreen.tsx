@@ -10,7 +10,6 @@ const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) =
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
-  const [contact, setContact] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false); // State for password visibility
 
@@ -20,12 +19,12 @@ const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) =
       return false;
     }
     if (!isLogin) {
-      if (!name || !studentId || !contact) {
-        Alert.alert('Error', 'All fields are required for sign-up.');
+      if (!name || !studentId) {
+        Alert.alert('Error', 'Name and Student ID are required for sign-up.');
         return false;
       }
-      if (isNaN(Number(studentId)) || isNaN(Number(contact))) {
-        Alert.alert('Error', 'Student ID and Contact must be numeric.');
+      if (isNaN(Number(studentId))) {
+        Alert.alert('Error', 'Student ID must be numeric.');
         return false;
       }
     }
@@ -40,7 +39,6 @@ const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) =
         const userDetails = {
           name,
           studentId,
-          contact,
         };
         await onSignUp(email, password, userDetails); // Pass user details to onSignUp
         const user = auth.currentUser;
@@ -96,14 +94,6 @@ const EditProfileScreen: React.FC<{ onLogin: (email: string, password: string) =
             keyboardType="numeric"
             maxLength={15}
           />
-          <TextInput
-            style={styles.input}
-            value={contact}
-            onChangeText={setContact}
-            placeholder="Contact Number"
-            keyboardType="numeric"
-            maxLength={15}
-          />
         </>
       )}
       <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
@@ -133,7 +123,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   input: {
-    backgroundColor: '#FFF',
+    backgroundColor: 'black',
     borderRadius: 10,
     padding: 15,
     marginBottom: 15,
