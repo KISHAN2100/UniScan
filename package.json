@@ -20,6 +20,7 @@
     "react-native": "0.76.1",
     "react-native-async-storage": "^0.0.1",
     "react-native-document-picker": "^9.3.1",
+    "react-native-linear-gradient": "^2.8.3",
     "react-native-mlkit-ocr": "^0.3.0",
     "react-native-vector-icons": "^10.2.0",
     "react-native-vision-camera": "^4.6.3",
