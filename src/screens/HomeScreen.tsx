@@ -1,4 +1,3 @@
-// src/screens/HomeScreen.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -11,11 +10,20 @@ import {
   ActivityIndicator,
   ScrollView,
   Share,
-  Clipboard,
+  Image,
+  Dimensions,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
-import MLKitOcr from 'react-native-mlkit-ocr';
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import { useTheme } from '../context/ThemeContext';
+import ImagePicker from 'react-native-image-crop-picker'; // Import the cropping library
+import DocumentPicker, { types } from 'react-native-document-picker'; // Import DocumentPicker
+import { WebView } from 'react-native-webview'; // Import WebView
+import RNFS from 'react-native-fs'; // Import react-native-fs
+import { Clipboard } from 'react-native';
+const { width, height } = Dimensions.get('window'); // Get device dimensions
+
 
 interface HomeScreenProps {
   onNavigateToHistory?: () => void;
@@ -26,16 +34,45 @@ interface HomeScreenProps {
   ) => void;
 }
 
+interface CropPickerError {
+  code: string;
+  message: string;
+}
+
+// Type guard to check if error is CropPickerError
+const isCropPickerError = (error: any): error is CropPickerError => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+  );
+};
+
 const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigateToHistory,
   onNavigateToTextDisplay,
 }) => {
   const { theme, toggleTheme } = useTheme();
+
   const [scannedText, setScannedText] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('back');
+
+  // For photo preview
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
+  const [croppedPhotoUri, setCroppedPhotoUri] = useState<string | null>(null); // New state for cropped image
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false);
+
+  // PDF Preview States
+  const [isPdfModalVisible, setIsPdfModalVisible] = useState<boolean>(false);
+  const [pdfHtmlContent, setPdfHtmlContent] = useState<string>('');
+
+  // WebView Reference and Extraction State
+  const webViewRef = useRef<WebView>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -47,37 +84,360 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         );
       }
     })();
-
-    // Removed the Appearance listener to allow manual theme toggle
   }, []);
+
+  // Function to call Google Vision API
+  const callGoogleVisionAPI = async (imageUri: string) => {
+    try {
+      const API_KEY = 'AIzaSyBaT-vLkTzPHlt2sC2HH4DKD0_vuUwwJkw'; // Replace with your actual API Key
+      const endpoint = `https://vision.googleapis.com/v1/images:annotate?key=${API_KEY}`;
+  
+      // Ensure the imageUri starts with 'file://'
+      if (!imageUri.startsWith('file://')) {
+        imageUri = 'file://' + imageUri;
+      }
+  
+      // Extract the file path without the 'file://' prefix
+      const filePath = imageUri.replace('file://', '');
+  
+      // Check if the file exists
+      const fileExists = await RNFS.exists(filePath);
+      if (!fileExists) {
+        throw new Error('Image file does not exist at the specified path.');
+      }
+  
+      // Read the image file as base64
+      const imageBase64 = await RNFS.readFile(filePath, 'base64');
+  
+      // Prepare the API request body
+      const requestBody = {
+        requests: [
+          {
+            image: { content: imageBase64 },
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+          },
+        ],
+      };
+  
+      // Call Google Vision API
+      const googleResponse = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+  
+      if (!googleResponse.ok) {
+        const errorResponse = await googleResponse.text();
+        throw new Error(`Google Vision API Error: ${errorResponse}`);
+      }
+  
+      const result = await googleResponse.json();
+  
+      // Debug: Log the entire response for troubleshooting
+      console.log('Google Vision API Response:', JSON.stringify(result, null, 2));
+  
+      // Extract text from the response
+      const textAnnotations = result.responses[0]?.textAnnotations;
+      if (textAnnotations && textAnnotations.length > 0) {
+        return textAnnotations[0].description; // Return extracted text
+      } else {
+        return 'No text detected.';
+      }
+    } catch (error) {
+      console.error('Error calling Google Vision API:', error);
+      return 'Error processing image.';
+    }
+  };
 
   const handlePDFUpload = async () => {
     try {
-      // Implement PDF upload logic here.
-      const fileUri = 'file:///path/to/uploaded/document.pdf'; // Replace with actual URI
+      // Request storage permission on Android (if not already granted)
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          {
+            title: 'Storage Permission',
+            message: 'This app needs access to your storage to select PDFs.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
 
-      setIsProcessing(true);
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert(
+            'Permission Denied',
+            'Storage permission is required to select PDFs.'
+          );
+          return;
+        }
+      }
 
-      try {
-        const result = await MLKitOcr.detectFromUri(fileUri);
-        const text = result.map((block) => block.text).join('\n');
-        setScannedText(text);
-        Alert.alert('Success', `Extracted text from PDF`);
-        onNavigateToTextDisplay(text, fileUri, 'document');
-      } catch (error) {
-        console.error('Error processing PDF:', error);
-        Alert.alert('Error', 'An error occurred while processing the PDF.');
-      } finally {
+      // Open Document Picker to select a PDF
+      const res = await DocumentPicker.pick({
+        type: [types.pdf],
+      });
+
+      if (res && res[0]) {
+        let fileUri = res[0].uri;
+
+        console.log('Original File URI:', fileUri);
+
+        // For Android, convert content:// URI to file:// URI
+        if (Platform.OS === 'android' && !fileUri.startsWith('file://')) {
+          // Extract the file name
+          const fileName = res[0].name;
+
+          // Define the destination path in the temporary directory
+          const destPath = `${RNFS.TemporaryDirectoryPath}${fileName}`;
+
+          console.log('Destination Path:', destPath);
+
+          // Copy the file to the temporary directory
+          await RNFS.copyFile(fileUri, destPath);
+
+          console.log('File copied successfully.');
+
+          // Check if the file exists
+          const fileExists = await RNFS.exists(destPath);
+          console.log('Does the file exist?', fileExists);
+          if (!fileExists) {
+            Alert.alert('Error', 'The selected PDF file does not exist.');
+            return;
+          }
+
+          // Update the fileUri to point to the copied file
+          fileUri = 'file://' + destPath;
+        } else if (Platform.OS === 'ios') {
+          // For iOS, ensure the URI starts with file://
+          if (!fileUri.startsWith('file://')) {
+            fileUri = 'file://' + fileUri;
+          }
+        }
+
+        console.log('Final File URI:', fileUri);
+
+        // Check file existence
+        const filePath = fileUri.replace('file://', '');
+        const exists = await RNFS.exists(filePath);
+        console.log('File exists:', exists);
+        if (!exists) {
+          Alert.alert('Error', 'The selected PDF file does not exist.');
+          return;
+        }
+
+        // Read the PDF file as base64
+        const base64PDF = await RNFS.readFile(filePath, 'base64');
+
+        // Create HTML content with PDF.js embedded and multi-page support
+        // Inside handlePDFUpload function
+const htmlContent = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        background-color: ${theme === 'light' ? '#ffffff' : '#121212'};
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      #pdf-viewer {
+        flex: 1;
+        width: 100%;
+        overflow: auto;
+      }
+      #controls {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+        padding: 10px;
+        background-color: ${theme === 'light' ? '#f0f0f0' : '#1e1e1e'};
+      }
+      button {
+        padding: 10px 20px;
+        background-color: ${theme === 'light' ? '#3b82f6' : '#00ffea'};
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+      }
+      #page-info {
+        font-size: 16px;
+        color: ${theme === 'light' ? '#1f2937' : '#ffffff'};
+      }
+      canvas {
+        display: block;
+        margin: 0 auto;
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  </head>
+  <body>
+    <div id="pdf-viewer">
+      <canvas id="pdf-canvas"></canvas>
+    </div>
+    <div id="controls">
+      <button id="prev">Previous</button>
+      <span id="page-info">Page 1 of 1</span>
+      <button id="next">Next</button>
+      <!-- Removed Extract Button from WebView -->
+    </div>
+    <script>
+      console.log('WebView loaded');
+      const url = 'data:application/pdf;base64,${base64PDF}';
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d');
+      const prevButton = document.getElementById('prev');
+      const nextButton = document.getElementById('next');
+      // const extractButton = document.getElementById('extract'); // Removed Extract Button Reference
+      const pageInfo = document.getElementById('page-info');
+
+      let pdfDoc = null,
+          pageNum = 1,
+          pageIsRendering = false,
+          pageNumIsPending = null;
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+
+      const renderPage = num => {
+        console.log('Rendering page:', num);
+        pageIsRendering = true;
+
+        pdfDoc.getPage(num).then(page => {
+          const scale = canvas.parentElement.clientWidth / page.getViewport({ scale: 0.9 }).width;
+          const viewport = page.getViewport({ scale });
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          const renderCtx = { canvasContext: ctx, viewport };
+
+          page.render(renderCtx).promise.then(() => {
+            console.log('Page rendered:', num);
+            pageIsRendering = false;
+            if (pageNumIsPending !== null) {
+              renderPage(pageNumIsPending);
+              pageNumIsPending = null;
+            }
+          }).catch(error => {
+            console.error('Error during page rendering:', error);
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Error rendering page.' }));
+          });
+
+          pageInfo.textContent = 'Page ' + num + ' of ' + pdfDoc.numPages;
+        }).catch(error => {
+          console.error('Error getting page:', error);
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Error getting page.' }));
+        });
+      };
+
+      const queueRenderPage = num => {
+        if (pageIsRendering) {
+          pageNumIsPending = num;
+        } else {
+          renderPage(num);
+        }
+      };
+
+      const showPrevPage = () => {
+        if (pageNum <= 1) return;
+        pageNum--;
+        console.log('Navigating to previous page:', pageNum);
+        queueRenderPage(pageNum);
+      };
+
+      const showNextPage = () => {
+        if (pageNum >= pdfDoc.numPages) return;
+        pageNum++;
+        console.log('Navigating to next page:', pageNum);
+        queueRenderPage(pageNum);
+      };
+
+      // Handle messages from React Native
+      document.addEventListener('message', function(event) {
+        const message = event.data;
+        console.log('Received message from React Native:', message);
+        if (message === 'extractText') {
+          console.log('Initiating text extraction...');
+          extractTextFromPDF();
+        }
+      });
+
+      // Function to extract text from PDF
+      const extractTextFromPDF = async () => {
+        try {
+          console.log('Extract Text Message Received');
+          let fullText = '';
+          for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + '\\n';
+            console.log('Extracted text from page', i);
+          }
+          console.log('Extraction Complete');
+          // Send the extracted text back to React Native
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'extractedText', text: fullText }));
+        } catch (error) {
+          console.error('Error extracting text:', error);
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Error extracting text.' }));
+        }
+      };
+
+      prevButton.addEventListener('click', showPrevPage);
+      nextButton.addEventListener('click', showNextPage);
+      // extractButton.addEventListener('click', () => {
+      //   extractTextFromPDF();
+      // }); // Removed Extract Button Event Listener
+
+      pdfjsLib.getDocument(url).promise.then(pdfDoc_ => {
+        pdfDoc = pdfDoc_;
+        console.log('PDF loaded. Number of pages:', pdfDoc.numPages);
+        pageInfo.textContent = 'Page ' + pageNum + ' of ' + pdfDoc.numPages;
+        renderPage(pageNum);
+      }).catch(error => {
+        console.error('Error loading PDF:', error);
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Error loading PDF.' }));
+      });
+    </script>
+  </body>
+</html>
+`;
+
+
+        // Set the HTML content for WebView
+        setPdfHtmlContent(htmlContent);
+        setIsPdfModalVisible(true);
+
+        setIsProcessing(true);
+
+        // Optional: If you want to perform OCR on the PDF, implement it here
+
         setIsProcessing(false);
       }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Error', 'An error occurred while uploading the PDF.');
+    } catch (err: any) {
+      if (DocumentPicker.isCancel(err)) {
+        // User cancelled the picker, no action needed
+        console.log('User cancelled PDF picker.');
+      } else {
+        console.error('Unknown error:', err);
+        Alert.alert('Error', 'An error occurred while selecting the PDF.');
+      }
     }
   };
 
   const handleCameraScan = () => {
     setScannedText('');
+    setCapturedPhotoUri(null);
+    setCroppedPhotoUri(null); // Reset cropped photo URI
+    setIsPreviewVisible(false);
     setIsScanning(true);
   };
 
@@ -85,45 +445,97 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     if (!cameraRef.current) return;
 
     try {
-      const photo = await cameraRef.current.takePhoto();
-      const uri = photo.path.startsWith('file://') ? photo.path : 'file://' + photo.path;
+      const photo = await cameraRef.current.takePhoto({
+        flash: 'off',
+      });
+      const uri = photo.path.startsWith('file://')
+        ? photo.path
+        : 'file://' + photo.path;
 
-      Alert.alert(
-        'Confirm Photo',
-        'Do you want to use this photo or retake it?',
-        [
-          {
-            text: 'Retake',
-            onPress: () => {},
-            style: 'cancel',
-          },
-          {
-            text: 'Use Photo',
-            onPress: async () => {
-              try {
-                setIsProcessing(true);
-                const result = await MLKitOcr.detectFromUri(uri);
-                const text = result.map((block) => block.text).join('\n');
+      console.log('Captured Photo URI:', uri);
 
-                setScannedText(text);
-                setIsScanning(false);
-                setIsProcessing(false);
-                Alert.alert('Success', 'Text scanned successfully');
-                onNavigateToTextDisplay(text, uri, 'camera');
-              } catch (err) {
-                console.error(err);
-                setIsProcessing(false);
-                Alert.alert('Error', 'An error occurred while processing the photo.');
-              }
-            },
-          },
-        ],
-        { cancelable: false }
-      );
+      // Store the photo URI and show the preview instead of a prompt
+      setCapturedPhotoUri(uri);
+      setIsPreviewVisible(true);
     } catch (err) {
       console.error(err);
       Alert.alert('Error', 'An error occurred while taking the picture.');
     }
+  };
+
+  // Function to handle cropping
+  const handleCropPhoto = async () => {
+    if (!capturedPhotoUri) return;
+
+    try {
+      const croppedImage = await ImagePicker.openCropper({
+        path: capturedPhotoUri,
+        width: 300, // Desired width
+        height: 400, // Desired height
+        cropping: true,
+        cropperCircleOverlay: false, // Set to true if you want a circular crop
+        includeBase64: false,
+        mediaType: 'photo',
+      });
+
+      console.log('Cropped Image Path:', croppedImage.path);
+
+      setCroppedPhotoUri(croppedImage.path);
+      setIsPreviewVisible(true); // Keep preview visible to show cropped image
+    } catch (error: unknown) {
+      if (isCropPickerError(error)) {
+        if (error.code === 'E_PICKER_CANCELLED') {
+          // User cancelled cropping
+          console.log('User cancelled cropping.');
+          return;
+        }
+        // Handle other CropPicker errors
+        Alert.alert('Error', error.message);
+      } else {
+        // Handle unexpected errors
+        console.error('Unexpected error cropping image:', error);
+        Alert.alert(
+          'Error',
+          'An unexpected error occurred while cropping the photo.'
+        );
+      }
+    }
+  };
+
+  // Confirm photo: run OCR and close camera
+  const handleConfirmPhoto = async () => {
+    const imageUri = croppedPhotoUri || capturedPhotoUri; // Use cropped image if available
+
+    if (!imageUri) return;
+
+    try {
+      setIsProcessing(true);
+
+      // Call Google Vision API to extract text
+      const extractedText = await callGoogleVisionAPI(imageUri);
+
+      console.log('Extracted Text:', extractedText);
+
+      setScannedText(extractedText); // Display extracted text
+      setIsScanning(false); // Hide camera modal
+      setIsPreviewVisible(false); // Hide preview
+      setCroppedPhotoUri(null); // Reset cropped photo URI
+      setIsProcessing(false);
+
+      Alert.alert('Success', 'Text scanned successfully!');
+      onNavigateToTextDisplay(extractedText, imageUri, 'camera');
+    } catch (err) {
+      console.error('Error extracting text:', err);
+      setIsProcessing(false);
+      Alert.alert('Error', 'An error occurred while processing the image.');
+    }
+  };
+
+  // Retake photo: clear the captured URI and stay in camera modal
+  const handleRetakePhoto = () => {
+    setCapturedPhotoUri(null);
+    setCroppedPhotoUri(null); // Reset cropped photo URI
+    setIsPreviewVisible(false);
   };
 
   const handleShare = async () => {
@@ -211,7 +623,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         <TouchableOpacity
           style={[
             styles.actionButton,
-            theme === 'light' ? styles.lightActionButton : styles.darkActionButton,
+            theme === 'light'
+              ? styles.lightActionButton
+              : styles.darkActionButton,
           ]}
           onPress={handleCameraScan}
           accessibilityLabel="Scan Document"
@@ -230,7 +644,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         <TouchableOpacity
           style={[
             styles.actionButton,
-            theme === 'light' ? styles.lightActionButton : styles.darkActionButton,
+            theme === 'light'
+              ? styles.lightActionButton
+              : styles.darkActionButton,
           ]}
           onPress={handlePDFUpload}
           accessibilityLabel="Import PDF"
@@ -359,7 +775,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             theme === 'light' ? styles.lightContainer : styles.darkContainer,
           ]}
         >
-          {device && (
+          {/* If we haven't captured a photo yet, show the camera. Otherwise, show preview */}
+          {device && !capturedPhotoUri && (
             <Camera
               ref={cameraRef}
               style={styles.camera}
@@ -369,59 +786,83 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           )}
 
-          {/* Overlay Frame */}
-          <View style={styles.overlayContainer}>
-            <View
-              style={[
-                styles.overlayFrame,
-                theme === 'light' ? styles.lightOverlay : styles.darkOverlay,
-              ]}
-            />
-            <Text
-              style={[
-                styles.cameraInstruction,
-                theme === 'light' ? styles.lightText : styles.darkText,
-              ]}
-            >
-              Align the document within the frame
-            </Text>
-          </View>
+          {/* If a photo is captured, show a preview */}
+          {capturedPhotoUri && isPreviewVisible && (
+            <View style={styles.previewContainer}>
+              <Image
+                source={{ uri: croppedPhotoUri || capturedPhotoUri }}
+                style={styles.previewImage}
+              />
+              <View style={styles.previewButtonContainer}>
+                {/* Show Crop button only if the photo hasn't been cropped yet */}
+                {!croppedPhotoUri && (
+                  <TouchableOpacity
+                    onPress={handleCropPhoto}
+                    style={[styles.previewButton, { backgroundColor: '#ffbb00' }]}
+                  >
+                    <Text style={styles.previewButtonText}>✂️ Crop</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  onPress={handleRetakePhoto}
+                  style={[styles.previewButton, { backgroundColor: '#ff005e' }]}
+                >
+                  <Text style={styles.previewButtonText}>Retake</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleConfirmPhoto}
+                  style={[styles.previewButton, { backgroundColor: '#00ffea' }]}
+                >
+                  <Text style={styles.previewButtonText}>Use Photo</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
-          {/* Capture Button */}
-          <View style={styles.captureButtonContainer}>
-            <TouchableOpacity
-              onPress={takePicture}
-              style={[
-                styles.captureButton,
-                theme === 'light'
-                  ? styles.lightCaptureButton
-                  : styles.darkCaptureButton,
-              ]}
-              accessibilityLabel="Capture Photo"
-            >
-              <Text
+          {/* Capture Button (only show if not previewing) */}
+          {!capturedPhotoUri && (
+            <View style={styles.captureButtonContainer}>
+              <TouchableOpacity
+                onPress={takePicture}
                 style={[
-                  styles.captureButtonText,
+                  styles.captureButton,
                   theme === 'light'
-                    ? styles.lightCaptureButtonText
-                    : styles.darkCaptureButtonText,
+                    ? styles.lightCaptureButton
+                    : styles.darkCaptureButton,
                 ]}
+                accessibilityLabel="Capture Photo"
               >
-                📸
-              </Text>
-            </TouchableOpacity>
-          </View>
+                <Text
+                  style={[
+                    styles.captureButtonText,
+                    theme === 'light'
+                      ? styles.lightCaptureButtonText
+                      : styles.darkCaptureButtonText,
+                  ]}
+                >
+                  📸
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Close Button */}
           <TouchableOpacity
-            onPress={() => setIsScanning(false)}
+            onPress={() => {
+              setIsScanning(false);
+              setCapturedPhotoUri(null);
+              setCroppedPhotoUri(null); // Reset cropped photo URI
+              setIsPreviewVisible(false);
+            }}
             style={styles.closeButton}
             accessibilityLabel="Close Camera"
           >
             <Text
               style={[
                 styles.closeButtonText,
-                theme === 'light' ? styles.lightCloseButtonText : styles.darkCloseButtonText,
+                theme === 'light'
+                  ? styles.lightCloseButtonText
+                  : styles.darkCloseButtonText,
               ]}
             >
               ❌
@@ -430,12 +871,166 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         </View>
       </Modal>
 
+      {/* PDF Preview Modal */}
+      <Modal
+        visible={isPdfModalVisible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setIsPdfModalVisible(false)}
+      >
+        <SafeAreaView
+          style={[
+            styles.container,
+            theme === 'light' ? styles.lightContainer : styles.darkContainer,
+          ]}
+        >
+          {/* Header for PDF Preview */}
+          <View
+            style={[
+              styles.pdfHeader,
+              theme === 'light' ? styles.lightCard : styles.darkCard,
+            ]}
+          >
+            <Text
+              style={[
+                styles.pdfHeaderText,
+                theme === 'light' ? styles.lightText : styles.darkText,
+              ]}
+            >
+              📄 PDF Preview
+            </Text>
+            <TouchableOpacity
+              onPress={() => setIsPdfModalVisible(false)}
+              style={styles.closePdfButton}
+              accessibilityLabel="Close PDF Preview"
+            >
+              <Text
+                style={[
+                  styles.closePdfButtonText,
+                  theme === 'light'
+                    ? styles.lightCloseButtonText
+                    : styles.darkCloseButtonText,
+                ]}
+              >
+                ❌
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* WebView to display PDF */}
+          {pdfHtmlContent ? (
+            <WebView
+              ref={webViewRef} // Assign the ref
+              originWhitelist={['*']}
+              source={{ html: pdfHtmlContent }}
+              style={styles.pdf}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              startInLoadingState={true}
+              renderLoading={() => (
+                <ActivityIndicator
+                  size="large"
+                  color={theme === 'light' ? '#00ffea' : '#3b82f6'}
+                  style={styles.webViewLoader}
+                />
+              )}
+              onMessage={(event) => {
+                try {
+                  const messageData = JSON.parse(event.nativeEvent.data);
+                  if (messageData.type === 'error') {
+                    Alert.alert('Error', messageData.message);
+                    setIsPdfModalVisible(false);
+                  } else if (messageData.type === 'extractedText') {
+                    const extractedText = messageData.text;
+                    Alert.alert('Extraction Successful', 'Text has been extracted from the PDF.');
+                    setScannedText(extractedText); // Display extracted text
+                    setIsPdfModalVisible(false); // Close PDF modal
+                    onNavigateToTextDisplay(extractedText, 'N/A', 'document'); // 'N/A' for URI since it's from PDF
+                  }
+                } catch (error) {
+                  console.error('Error parsing message from WebView:', error);
+                }
+              }}
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('WebView error: ', nativeEvent);
+                Alert.alert('Error', 'Failed to load PDF in WebView.');
+              }}
+              onLoadEnd={() => {
+                console.log('WebView load ended.');
+              }}
+            />
+          ) : (
+            <ActivityIndicator
+              size="large"
+              color={theme === 'light' ? '#00ffea' : '#3b82f6'}
+              style={styles.webViewLoader}
+            />
+          )}
+
+          {/* Extract Button */}
+          <View style={styles.extractButtonContainer}>
+            <TouchableOpacity
+              onPress={() => {
+                if (webViewRef.current) {
+                  webViewRef.current.postMessage('extractText');
+                  setIsExtracting(true);
+                }
+              }}
+              style={[
+                styles.extractButton,
+                theme === 'light'
+                  ? styles.lightExtractButton
+                  : styles.darkExtractButton,
+              ]}
+              accessibilityLabel="Extract Text from PDF"
+            >
+              <Text
+                style={[
+                  styles.extractButtonText,
+                  theme === 'light' ? styles.lightButtonText : styles.darkButtonText,
+                ]}
+              >
+                📄 Extract Text
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Processing Overlay for Extraction */}
+          {isExtracting && (
+            <View
+              style={[
+                styles.processingOverlay,
+                theme === 'light'
+                  ? styles.lightProcessingOverlay
+                  : styles.darkProcessingOverlay,
+              ]}
+            >
+              <ActivityIndicator
+                size="large"
+                color={theme === 'light' ? '#00ffea' : '#3b82f6'}
+              />
+              <Text
+                style={[
+                  styles.processingText,
+                  theme === 'light' ? styles.lightText : styles.darkText,
+                ]}
+              >
+                Extracting Text...
+              </Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+
       {/* Processing Overlay */}
       {isProcessing && (
         <View
           style={[
             styles.processingOverlay,
-            theme === 'light' ? styles.lightProcessingOverlay : styles.darkProcessingOverlay,
+            theme === 'light'
+              ? styles.lightProcessingOverlay
+              : styles.darkProcessingOverlay,
           ]}
         >
           <ActivityIndicator
@@ -455,6 +1050,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     </SafeAreaView>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
@@ -635,37 +1231,6 @@ const styles = StyleSheet.create({
   camera: {
     ...StyleSheet.absoluteFillObject,
   },
-  overlayContainer: {
-    position: 'absolute',
-    top: '20%',
-    left: '10%',
-    right: '10%',
-    bottom: '30%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlayFrame: {
-    width: '100%',
-    height: '100%',
-    borderWidth: 2,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 255, 234, 0.1)',
-  },
-  darkOverlay: {
-    borderColor: '#00ffea',
-  },
-  lightOverlay: {
-    borderColor: '#3b82f6',
-  },
-  cameraInstruction: {
-    position: 'absolute',
-    bottom: -40,
-    fontSize: 16,
-    textAlign: 'center',
-    width: '100%',
-    paddingHorizontal: 20,
-    fontWeight: '600',
-  },
   captureButtonContainer: {
     position: 'absolute',
     bottom: 60,
@@ -724,6 +1289,94 @@ const styles = StyleSheet.create({
   processingText: {
     marginTop: 15,
     fontSize: 20,
+    fontWeight: '700',
+  },
+
+  // Preview styles
+  previewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+  },
+  previewImage: {
+    width: '100%',
+    height: '80%',
+    resizeMode: 'contain',
+  },
+  previewButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 20,
+    paddingHorizontal: 10,
+  },
+  previewButton: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginHorizontal: 5,
+  },
+  previewButtonText: {
+    color: '#1e1e1e',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+
+  // PDF Preview Styles
+  pdfHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#ffffff', // Adjust based on theme if needed
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  pdfHeaderText: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  closePdfButton: {
+    padding: 10,
+  },
+  closePdfButtonText: {
+    fontSize: 24,
+  },
+  pdf: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  webViewLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // New Styles for Extract Button
+  extractButtonContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  extractButton: {
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  lightExtractButton: {
+    backgroundColor: '#3b82f6',
+  },
+  darkExtractButton: {
+    backgroundColor: '#00ffea',
+  },
+  extractButtonText: {
+    fontSize: 18,
     fontWeight: '700',
   },
 });

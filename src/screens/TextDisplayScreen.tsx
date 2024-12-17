@@ -58,12 +58,13 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
   const [currentTranslation, setCurrentTranslation] = useState<{ language: string; text: string } | null>(null);
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-
+  const [selectedText, setSelectedText] = useState<string>('');
   // We replace the horizontal ScrollView language selector with a modal-based picker
   const [isLanguagePickerVisible, setIsLanguagePickerVisible] = useState<boolean>(false);
 
   // For demonstration, default the selected language to the first in the list
   const [selectedLanguage, setSelectedLanguage] = useState<string>(languages[0].code);
+  
 
   useEffect(() => {
     const extractText = async () => {
@@ -152,9 +153,13 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
 
   // Simple web search
   const handleSearch = () => {
-    const query = encodeURIComponent(scannedText);
-    const url = `https://www.google.com/search?q=${query}`;
-    Linking.openURL(url);
+    if(!selectedText.trim()){
+      Alert.alert('No Text Selected', 'Please highlight a portion of the text you want to search'
+      );
+      return;
+    }
+    const uri = `https://www.google.com/search?q=${selectedText}`;
+    Linking.openURL(uri);
   };
 
   // Toggle language picker modal

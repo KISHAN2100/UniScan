@@ -1,51 +1,79 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { auth } from '../firebaseConfig'; // Ensure this import is correct
-import { signInWithEmailAndPassword } from 'firebase/auth'; // Import the function
-import firestore from '@react-native-firebase/firestore'; // Import Firestore
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { auth } from '../firebaseConfig';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  User,
+  onAuthStateChanged
+} from 'firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import { Alert } from 'react-native';
-import { createUserWithEmailAndPassword } from 'firebase/auth'; // Import the function
 
 interface AuthContextType {
-  user: any; // You can define a more specific type based on your user object
+  user: User | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  signUp: (email: string, password: string, userDetails: any) => Promise<void>; // Accept user details
+  signUp: (email: string, password: string, userDetails: any) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [initializing, setInitializing] = useState<boolean>(true);
+
   const login = async (email: string, password: string) => {
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password); // Call the function directly
-      setUser(userCredential.user);
-    } catch (error) {
+      await signInWithEmailAndPassword(auth, email, password);
+      Alert.alert('Success', 'Logged in successfully!');
+    } catch (error: any) {
       console.error('Error logging in:', error);
-      Alert.alert('Error', 'Invalid email or password');
+      Alert.alert('Login Error', error.message || 'Invalid email or password');
     }
   };
 
   const logout = async () => {
-    await auth.signOut();
-    setUser(null);
+    try {
+      await signOut(auth);
+      Alert.alert('Success', 'Logged out successfully!');
+    } catch (error: any) {
+      console.error('Error logging out:', error);
+      Alert.alert('Logout Error', error.message || 'An error occurred while logging out');
+    }
   };
 
   const signUp = async (email: string, password: string, userDetails: any) => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password); // Use auth directly
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       setUser(userCredential.user);
 
       // Store user details in Firestore
       await firestore().collection('users').doc(userCredential.user.uid).set({
-        email: userCredential.user.email, // Store email
-        ...userDetails, // Spread other user details
+        email: userCredential.user.email,
+        ...userDetails,
       });
-    } catch (error) {
-      console.error('Error signing up:', error); // Log the error
-      Alert.alert('Error', 'An error occurred while signing up'); // Show an alert with the error message
+
+      Alert.alert('Success', 'Account created successfully!');
+    } catch (error: any) {
+      console.error('Error signing up:', error);
+      Alert.alert('Sign-Up Error', error.message || 'An error occurred while signing up');
     }
   };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (initializing) setInitializing(false);
+    });
+
+    return () => unsubscribe();
+  }, [initializing]);
+
+  if (initializing) {
+    // You can return a loading indicator here if desired
+    return null;
+  }
 
   return (
     <AuthContext.Provider value={{ user, login, logout, signUp }}>

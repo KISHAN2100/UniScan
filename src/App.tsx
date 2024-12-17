@@ -5,66 +5,76 @@ import HistoryScreen from './screens/HistoryScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
 import SplashScreen from './screens/SplashScreen';
 import TextDisplayScreen from './screens/TextDisplayScreen';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from './firebaseConfig'; // Ensure this is correctly set up
-import { ScanItem } from './context/types'; // Import the ScanItem interface
+import { auth } from './firebaseConfig';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, User } from 'firebase/auth';
 import { ThemeProvider } from './context/ThemeContext';
+import ProfileScreen from './screens/ProfileScreen';
+import { ScanItem } from './context/types';
+
 const App: React.FC = () => {
-  // Define the possible screens
   const [currentScreen, setCurrentScreen] = useState<'splash' | 'home' | 'history' | 'profile' | 'textDisplay'>('splash');
-  
-  // State to hold the scanned text and selected scan
+  // Store the currently authenticated Firebase user object
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+
+  // State for scanned items
   const [scanHistory, setScanHistory] = useState<ScanItem[]>([]);
   const [selectedScan, setSelectedScan] = useState<ScanItem | null>(null);
-  
-  // User authentication state
-  const [user, setUser] = useState<any>(null);
 
-  // Navigate from splash to home after 3 seconds
+  // **1) Show SplashScreen for 3 seconds, then go to Home**
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setCurrentScreen('home');
-    }, 3000);
-
+    const timer = setTimeout(() => setCurrentScreen('home'), 3000);
     return () => clearTimeout(timer);
   }, []);
 
-  // Handle user login
+  // **2) Listen for Auth State changes (this ensures 'stay logged in')**
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log('User is logged in:', user);
+        setFirebaseUser(user);
+      } else {
+        console.log('No user is logged in');
+        setFirebaseUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // **3) Handle Login**
   const handleLogin = async (email: string, password: string) => {
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      console.log('Logged in as:', user.email);
-      setUser(user.email);
+      await signInWithEmailAndPassword(auth, email, password);
       Alert.alert('Success', 'Logged in successfully!');
+      setCurrentScreen('home');
     } catch (error: any) {
-      console.log('login error', error.message);
+      console.error('Login error:', error);
       Alert.alert('Login Failed', error.message);
     }
   };
 
-  // Handle user sign-up
+  // **4) Handle Sign Up**
   const handleSignUp = async (email: string, password: string, userDetails: any) => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      console.log('User registered:', user.email);
-      setUser(user.email);
-      setCurrentScreen('home');
+      await createUserWithEmailAndPassword(auth, email, password);
       Alert.alert('Success', 'Account created successfully!');
-      
-      // Store additional user details if needed
-      // Example using Firebase Realtime Database
-      // const userId = user.uid;
-      // const userRef = ref(db, `users/${userId}`);
-      // set(userRef, userDetails);
+      setCurrentScreen('home');
     } catch (error: any) {
-      console.error('Sign-up:', error.message);
+      console.error('Sign-up error:', error);
       Alert.alert('Sign-up Failed', error.message);
     }
   };
 
-  // Handle navigation to TextDisplayScreen and add scan to history
+  // **5) Handle Logout**
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      setCurrentScreen('profile'); // We'll switch back to profile, which triggers login page if no user
+    } catch (error: any) {
+      Alert.alert('Logout Failed', error.message);
+    }
+  };
+
+  // **6) Navigation & Scan Logic**
   const handleNavigateToTextDisplay = (text: string, uri: string, type: 'document' | 'camera' | 'image') => {
     const newScan: ScanItem = {
       id: generateUniqueId(),
@@ -74,34 +84,29 @@ const App: React.FC = () => {
       status: 'completed',
       uri,
     };
-    setScanHistory(prevHistory => [newScan, ...prevHistory]);
+    setScanHistory(prev => [newScan, ...prev]);
     setSelectedScan(newScan);
     setCurrentScreen('textDisplay');
   };
 
-  // Navigate back to home
-  const handleNavigateBackToHome = () => {
-    setCurrentScreen('home');
-  };
+  const handleNavigateBackToHome = () => setCurrentScreen('home');
 
-  // Handle selection of a scan from history
   const handleSelectScan = (scan: ScanItem) => {
     setSelectedScan(scan);
     setCurrentScreen('textDisplay');
   };
 
-  // Handle deletion of a scan from history
   const handleDeleteScan = (id: string) => {
-    setScanHistory(prevHistory => prevHistory.filter(scan => scan.id !== id));
+    setScanHistory(prev => prev.filter(scan => scan.id !== id));
     Alert.alert('Deleted', 'Scan has been deleted from history.');
   };
 
-  // Function to generate unique IDs without external libraries
+  // Unique ID generator
   const generateUniqueId = (): string => {
-    return `${Date.now()}-${Math.floor(Math.random() * 1000)}`; // Combines timestamp with a random number
+    return `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   };
 
-  // Render the appropriate screen based on currentScreen state
+  // **7) Render Screens** based on state
   const renderScreen = () => {
     switch (currentScreen) {
       case 'splash':
@@ -123,11 +128,22 @@ const App: React.FC = () => {
           />
         );
       case 'profile':
-        return <EditProfileScreen onLogin={handleLogin} onSignUp={handleSignUp} />;
+        // If the user is null => Show EditProfileScreen
+        // If the user is not null => Show ProfileScreen
+        return firebaseUser ? (
+          <ProfileScreen onLogout={handleLogout} />
+        ) : (
+          <EditProfileScreen onLogin={handleLogin} onSignUp={handleSignUp} />
+        );
       case 'textDisplay':
-        return selectedScan ? (
-          <TextDisplayScreen scanItem={selectedScan} onBack={handleNavigateBackToHome} />
-        ) : null;
+        return (
+          selectedScan && (
+            <TextDisplayScreen
+              scanItem={selectedScan}
+              onBack={handleNavigateBackToHome}
+            />
+          )
+        );
       default:
         return null;
     }
@@ -136,10 +152,9 @@ const App: React.FC = () => {
   return (
     <ThemeProvider>
       <SafeAreaView style={styles.container}>
-        <View style={styles.screenContainer}>
-          {renderScreen()}
-        </View>
-        {/* Conditionally render the default bottom navigation bar */}
+        <View style={styles.screenContainer}>{renderScreen()}</View>
+
+        {/* Bottom navigation bar, hidden on Splash & TextDisplay */}
         {currentScreen !== 'splash' && currentScreen !== 'textDisplay' && (
           <View style={styles.navBar}>
             <TouchableOpacity onPress={() => setCurrentScreen('home')} style={styles.navItem}>
