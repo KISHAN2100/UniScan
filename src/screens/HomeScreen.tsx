@@ -22,8 +22,7 @@ import DocumentPicker, { types } from 'react-native-document-picker'; // Import 
 import { WebView } from 'react-native-webview'; // Import WebView
 import RNFS from 'react-native-fs'; // Import react-native-fs
 import { Clipboard } from 'react-native';
-const { width, height } = Dimensions.get('window'); // Get device dimensions
-
+import * as pdfjs from 'react-native-pdf';
 
 interface HomeScreenProps {
   onNavigateToHistory?: () => void;
@@ -74,6 +73,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const webViewRef = useRef<WebView>(null);
   const [isExtracting, setIsExtracting] = useState(false);
 
+  const [photoSettings, setPhotoSettings] = useState({
+    flash: 'off',
+    qualityPrioritization: 'quality',
+    enableAutoStabilization: true,
+    skipMetadata: false,
+  })
+
   useEffect(() => {
     (async () => {
       const cameraPermission = await Camera.requestCameraPermission();
@@ -91,24 +97,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     try {
       const API_KEY = 'AIzaSyBaT-vLkTzPHlt2sC2HH4DKD0_vuUwwJkw'; // Replace with your actual API Key
       const endpoint = `https://vision.googleapis.com/v1/images:annotate?key=${API_KEY}`;
-  
+
       // Ensure the imageUri starts with 'file://'
       if (!imageUri.startsWith('file://')) {
         imageUri = 'file://' + imageUri;
       }
-  
+
       // Extract the file path without the 'file://' prefix
       const filePath = imageUri.replace('file://', '');
-  
+
       // Check if the file exists
       const fileExists = await RNFS.exists(filePath);
       if (!fileExists) {
         throw new Error('Image file does not exist at the specified path.');
       }
-  
+
       // Read the image file as base64
       const imageBase64 = await RNFS.readFile(filePath, 'base64');
-  
+
       // Prepare the API request body
       const requestBody = {
         requests: [
@@ -118,24 +124,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           },
         ],
       };
-  
+
       // Call Google Vision API
       const googleResponse = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
-  
+
       if (!googleResponse.ok) {
         const errorResponse = await googleResponse.text();
         throw new Error(`Google Vision API Error: ${errorResponse}`);
       }
-  
+
       const result = await googleResponse.json();
-  
+
       // Debug: Log the entire response for troubleshooting
       console.log('Google Vision API Response:', JSON.stringify(result, null, 2));
-  
+
       // Extract text from the response
       const textAnnotations = result.responses[0]?.textAnnotations;
       if (textAnnotations && textAnnotations.length > 0) {
@@ -151,8 +157,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const handlePDFUpload = async () => {
     try {
-      // Request storage permission on Android (if not already granted)
-      if (Platform.OS === 'android') {
+      console.log('handlePDFUpload: Starting PDF upload process.');
+
+      // Determine the Android version
+      const apiLevel = Platform.Version;
+
+      // For Android versions below 13, request READ_EXTERNAL_STORAGE permission
+      if (Platform.OS === 'android' && parseInt(apiLevel as string) < 33) {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
           {
@@ -169,8 +180,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             'Permission Denied',
             'Storage permission is required to select PDFs.'
           );
+          console.log('handlePDFUpload: READ_EXTERNAL_STORAGE permission denied.');
           return;
         }
+        console.log('handlePDFUpload: READ_EXTERNAL_STORAGE permission granted.');
       }
 
       // Open Document Picker to select a PDF
@@ -178,36 +191,48 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         type: [types.pdf],
       });
 
+      console.log('handlePDFUpload: Document picked successfully.', res);
+
       if (res && res[0]) {
         let fileUri = res[0].uri;
 
         console.log('Original File URI:', fileUri);
 
-        // For Android, convert content:// URI to file:// URI
-        if (Platform.OS === 'android' && !fileUri.startsWith('file://')) {
+        // For Android, handle content:// URIs
+        if (Platform.OS === 'android' && fileUri.startsWith('content://')) {
+          console.log('handlePDFUpload: Handling content URI.');
+
           // Extract the file name
-          const fileName = res[0].name;
+          const fileName = res[0].name || `temp_${Date.now()}.pdf`;
 
           // Define the destination path in the temporary directory
           const destPath = `${RNFS.TemporaryDirectoryPath}${fileName}`;
 
           console.log('Destination Path:', destPath);
 
-          // Copy the file to the temporary directory
-          await RNFS.copyFile(fileUri, destPath);
+          // Copy the file from content:// URI to the temporary directory
+          // RNFS.copyFile requires file:// URI, so ensure destPath has file://
+          const destUri = destPath.startsWith('file://') ? destPath : `file://${destPath}`;
 
-          console.log('File copied successfully.');
+          try {
+            await RNFS.copyFile(fileUri, destPath);
+            console.log('File copied successfully.');
 
-          // Check if the file exists
-          const fileExists = await RNFS.exists(destPath);
-          console.log('Does the file exist?', fileExists);
-          if (!fileExists) {
-            Alert.alert('Error', 'The selected PDF file does not exist.');
+            // Check if the file exists
+            const fileExists = await RNFS.exists(destPath);
+            console.log('Does the file exist?', fileExists);
+            if (!fileExists) {
+              Alert.alert('Error', 'The selected PDF file does not exist.');
+              return;
+            }
+
+            // Update the fileUri to point to the copied file
+            fileUri = destUri;
+          } catch (copyError) {
+            console.error('handlePDFUpload: Error copying file:', copyError);
+            Alert.alert('Error', 'Failed to access the selected PDF file.');
             return;
           }
-
-          // Update the fileUri to point to the copied file
-          fileUri = 'file://' + destPath;
         } else if (Platform.OS === 'ios') {
           // For iOS, ensure the URI starts with file://
           if (!fileUri.startsWith('file://')) {
@@ -228,10 +253,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
         // Read the PDF file as base64
         const base64PDF = await RNFS.readFile(filePath, 'base64');
+        console.log('handlePDFUpload: PDF file read as base64.');
 
         // Create HTML content with PDF.js embedded and multi-page support
-        // Inside handlePDFUpload function
-const htmlContent = `
+        const htmlContent = `
 <!DOCTYPE html>
 <html>
   <head>
@@ -297,7 +322,6 @@ const htmlContent = `
       const ctx = canvas.getContext('2d');
       const prevButton = document.getElementById('prev');
       const nextButton = document.getElementById('next');
-      // const extractButton = document.getElementById('extract'); // Removed Extract Button Reference
       const pageInfo = document.getElementById('page-info');
 
       let pdfDoc = null,
@@ -361,7 +385,7 @@ const htmlContent = `
       };
 
       // Handle messages from React Native
-      document.addEventListener('message', function(event) {
+      window.addEventListener('message', function(event) {
         const message = event.data;
         console.log('Received message from React Native:', message);
         if (message === 'extractText') {
@@ -370,24 +394,45 @@ const htmlContent = `
         }
       });
 
-      // Function to extract text from PDF
+      // Enhance the extractTextFromPDF function
       const extractTextFromPDF = async () => {
         try {
-          console.log('Extract Text Message Received');
+          console.log('Starting PDF text extraction...');
           let fullText = '';
-          for (let i = 1; i <= pdfDoc.numPages; i++) {
-            const page = await pdfDoc.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            fullText += pageText + '\\n';
-            console.log('Extracted text from page', i);
+          
+          if (!pdfDoc) {
+            throw new Error('PDF document not loaded');
           }
-          console.log('Extraction Complete');
-          // Send the extracted text back to React Native
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'extractedText', text: fullText }));
+
+          const totalPages = pdfDoc.numPages;
+          console.log('Total pages:', totalPages);
+
+          for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            console.log('Processing page:', pageNum);
+            const page = await pdfDoc.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            
+            const pageText = textContent.items
+              .map(item => item.str)
+              .join(' ')
+              .replace(/\\s+/g, ' ')
+              .trim();
+
+            fullText += pageText + '\\n\\n';
+            console.log('Page', pageNum, 'processed');
+          }
+
+          console.log('Text extraction complete');
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'extractedText',
+            text: fullText.trim()
+          }));
         } catch (error) {
-          console.error('Error extracting text:', error);
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Error extracting text.' }));
+          console.error('PDF extraction error:', error);
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'error',
+            message: 'Failed to extract text from PDF: ' + error.message
+          }));
         }
       };
 
@@ -411,7 +456,6 @@ const htmlContent = `
 </html>
 `;
 
-
         // Set the HTML content for WebView
         setPdfHtmlContent(htmlContent);
         setIsPdfModalVisible(true);
@@ -425,9 +469,9 @@ const htmlContent = `
     } catch (err: any) {
       if (DocumentPicker.isCancel(err)) {
         // User cancelled the picker, no action needed
-        console.log('User cancelled PDF picker.');
+        console.log('handlePDFUpload: User cancelled PDF picker.');
       } else {
-        console.error('Unknown error:', err);
+        console.error('handlePDFUpload: Unknown error:', err);
         Alert.alert('Error', 'An error occurred while selecting the PDF.');
       }
     }
@@ -458,7 +502,7 @@ const htmlContent = `
       setCapturedPhotoUri(uri);
       setIsPreviewVisible(true);
     } catch (err) {
-      console.error(err);
+      console.error('takePicture:', err);
       Alert.alert('Error', 'An error occurred while taking the picture.');
     }
   };
@@ -468,14 +512,17 @@ const htmlContent = `
     if (!capturedPhotoUri) return;
 
     try {
+      const {width: screenWidth} = Dimensions.get('window');
       const croppedImage = await ImagePicker.openCropper({
         path: capturedPhotoUri,
-        width: 300, // Desired width
-        height: 400, // Desired height
+        width: screenWidth * 0.9, // 80% of screen width
+        height: screenWidth * 0.9 , // 80% of screen width
         cropping: true,
         cropperCircleOverlay: false, // Set to true if you want a circular crop
         includeBase64: false,
         mediaType: 'photo',
+        compressImageQuality: 1,
+        forceJpg: true,
       });
 
       console.log('Cropped Image Path:', croppedImage.path);
@@ -486,14 +533,14 @@ const htmlContent = `
       if (isCropPickerError(error)) {
         if (error.code === 'E_PICKER_CANCELLED') {
           // User cancelled cropping
-          console.log('User cancelled cropping.');
+          console.log('handleCropPhoto: User cancelled cropping.');
           return;
         }
         // Handle other CropPicker errors
         Alert.alert('Error', error.message);
       } else {
         // Handle unexpected errors
-        console.error('Unexpected error cropping image:', error);
+        console.error('handleCropPhoto: Unexpected error cropping image:', error);
         Alert.alert(
           'Error',
           'An unexpected error occurred while cropping the photo.'
@@ -525,7 +572,7 @@ const htmlContent = `
       Alert.alert('Success', 'Text scanned successfully!');
       onNavigateToTextDisplay(extractedText, imageUri, 'camera');
     } catch (err) {
-      console.error('Error extracting text:', err);
+      console.error('handleConfirmPhoto:', err);
       setIsProcessing(false);
       Alert.alert('Error', 'An error occurred while processing the image.');
     }
@@ -544,7 +591,7 @@ const htmlContent = `
         message: scannedText,
       });
     } catch (error) {
-      console.log('Error sharing text:', error);
+      console.log('handleShare: Error sharing text:', error);
     }
   };
 
@@ -792,6 +839,7 @@ const htmlContent = `
               <Image
                 source={{ uri: croppedPhotoUri || capturedPhotoUri }}
                 style={styles.previewImage}
+                resizeMode="contain"
               />
               <View style={styles.previewButtonContainer}>
                 {/* Show Crop button only if the photo hasn't been cropped yet */}
@@ -936,28 +984,37 @@ const htmlContent = `
               )}
               onMessage={(event) => {
                 try {
+                  console.log('Received message from WebView:', event.nativeEvent.data); // Add debug logging
                   const messageData = JSON.parse(event.nativeEvent.data);
                   if (messageData.type === 'error') {
                     Alert.alert('Error', messageData.message);
                     setIsPdfModalVisible(false);
                   } else if (messageData.type === 'extractedText') {
                     const extractedText = messageData.text;
-                    Alert.alert('Extraction Successful', 'Text has been extracted from the PDF.');
-                    setScannedText(extractedText); // Display extracted text
-                    setIsPdfModalVisible(false); // Close PDF modal
-                    onNavigateToTextDisplay(extractedText, 'N/A', 'document'); // 'N/A' for URI since it's from PDF
+                    console.log('Extracted text length:', extractedText?.length); // Add debug logging
+                    if (extractedText && extractedText.trim()) {
+                      setIsExtracting(false);
+                      setIsPdfModalVisible(false); // Close PDF modal
+                      // Navigate to TextDisplay screen with the extracted text
+                      onNavigateToTextDisplay(extractedText, '', 'document');
+                    } else {
+                      setIsExtracting(false);
+                      Alert.alert('Error', 'No text could be extracted from the PDF.');
+                    }
                   }
                 } catch (error) {
-                  console.error('Error parsing message from WebView:', error);
+                  console.error('Error processing WebView message:', error);
+                  setIsExtracting(false);
+                  Alert.alert('Error', 'Failed to process PDF text');
                 }
               }}
               onError={(syntheticEvent) => {
                 const { nativeEvent } = syntheticEvent;
-                console.error('WebView error: ', nativeEvent);
+                console.error('handlePDFUpload: WebView error: ', nativeEvent);
                 Alert.alert('Error', 'Failed to load PDF in WebView.');
               }}
               onLoadEnd={() => {
-                console.log('WebView load ended.');
+                console.log('handlePDFUpload: WebView load ended.');
               }}
             />
           ) : (
@@ -973,25 +1030,31 @@ const htmlContent = `
             <TouchableOpacity
               onPress={() => {
                 if (webViewRef.current) {
-                  webViewRef.current.postMessage('extractText');
+                  console.log('Initiating text extraction...'); // Add debug logging
                   setIsExtracting(true);
+                  webViewRef.current.injectJavaScript(`
+        try {
+          console.log('Starting PDF text extraction...');
+          extractTextFromPDF();
+        } catch (error) {
+          console.error('Error in extraction:', error);
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'error',
+            message: 'Failed to extract text: ' + error.message
+          }));
+        }
+        true;
+      `);
                 }
               }}
               style={[
                 styles.extractButton,
-                theme === 'light'
-                  ? styles.lightExtractButton
-                  : styles.darkExtractButton,
+                theme === 'light' ? styles.lightExtractButton : styles.darkExtractButton,
               ]}
-              accessibilityLabel="Extract Text from PDF"
+              disabled={isExtracting}
             >
-              <Text
-                style={[
-                  styles.extractButtonText,
-                  theme === 'light' ? styles.lightButtonText : styles.darkButtonText,
-                ]}
-              >
-                📄 Extract Text
+              <Text style={[styles.extractButtonText, theme === 'light' ? styles.lightButtonText : styles.darkButtonText]}>
+                {isExtracting ? 'Extracting...' : '📄 Extract Text'}
               </Text>
             </TouchableOpacity>
           </View>

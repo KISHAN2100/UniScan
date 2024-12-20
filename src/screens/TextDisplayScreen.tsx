@@ -20,6 +20,7 @@ import MLKitOcr from 'react-native-mlkit-ocr';
 import { ScanItem } from '../context/types';
 import { useTheme } from '../context/ThemeContext';
 
+
 interface TextDisplayScreenProps {
   scanItem: ScanItem;
   onBack: () => void;
@@ -27,6 +28,7 @@ interface TextDisplayScreenProps {
 
 const languages = [
   { code: 'es', name: 'Spanish' },
+  {code:'en', name:'English'},
   { code: 'fr', name: 'French' },
   { code: 'de', name: 'German' },
   { code: 'zh', name: 'Chinese' },
@@ -70,18 +72,33 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
     const extractText = async () => {
       setIsProcessing(true);
       try {
-        const result = await MLKitOcr.detectFromUri(scanItem.uri);
-        const text = result.map(block => block.text).join('\n');
-        setScannedText(text);
+        console.log('ScanItem received:', scanItem); // Debug log
+        
+        if (scanItem.type === 'document') {
+          // For PDFs, directly use the text from scanItem
+          console.log('Setting PDF text:', scanItem.text); // Debug log
+          setScannedText(scanItem.text);
+        } else if (scanItem.type === 'camera' || scanItem.type === 'image') {
+          // For camera/image, use MLKit OCR
+          const result = await MLKitOcr.detectFromUri(scanItem.uri);
+          const text = result.map(block => block.text).join('\n');
+          setScannedText(text);
+        }
       } catch (error) {
-        console.error('Error extracting text from scan:', error);
-        Alert.alert('Error', 'An error occurred while extracting text from the scan.');
+        console.error('Error extracting text:', error);
+        Alert.alert('Error', 'An error occurred while extracting text.');
       } finally {
         setIsProcessing(false);
       }
     };
+    
     extractText();
-  }, [scanItem.uri]);
+  }, [scanItem]);
+
+  // Add debug rendering to verify text content
+  useEffect(() => {
+    console.log('Current scanned text:', scannedText);
+  }, [scannedText]);
 
   // Handle language selection & translation
   const handleLanguageSelect = async (languageCode: string, languageName: string) => {
@@ -152,15 +169,7 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
   };
 
   // Simple web search
-  const handleSearch = () => {
-    if(!selectedText.trim()){
-      Alert.alert('No Text Selected', 'Please highlight a portion of the text you want to search'
-      );
-      return;
-    }
-    const uri = `https://www.google.com/search?q=${selectedText}`;
-    Linking.openURL(uri);
-  };
+ 
 
   // Toggle language picker modal
   const handleTranslateToggle = () => {
@@ -244,7 +253,7 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
               theme === 'light' ? styles.lightText : styles.darkText
             ]}
           >
-            Extracted Text
+            {scanItem.type === 'document' ? 'PDF Text' : 'Extracted Text'}
           </Text>
 
           {isProcessing ? (
@@ -253,13 +262,15 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
             <TextInput
               style={[
                 styles.textInput, 
-                theme === 'light' ? styles.lightTextInput : styles.darkTextInput
+                theme === 'light' ? styles.lightTextInput : styles.darkTextInput,
+                { minHeight: 200 } // Increase minimum height
               ]}
               multiline
               value={scannedText}
               onChangeText={setScannedText}
               placeholder="Edit or review extracted text..."
               placeholderTextColor={theme === 'light' ? '#888' : '#ccc'}
+              textAlignVertical="top" // Ensure text starts from the top
             />
           )}
         </View>
@@ -332,29 +343,7 @@ const TextDisplayScreen: React.FC<TextDisplayScreenProps> = ({ scanItem, onBack 
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.bottomBarItem} 
-          onPress={handleSearch}
-          disabled={isTranslating || isProcessing}
-          activeOpacity={0.7}
-        >
-          <Text 
-            style={[
-              styles.bottomIcon, 
-              theme === 'light' ? styles.lightText : styles.darkText
-            ]}
-          >
-            🔎
-          </Text>
-          <Text 
-            style={[
-              styles.bottomLabel, 
-              theme === 'light' ? styles.lightText : styles.darkText
-            ]}
-          >
-            Search
-          </Text>
-        </TouchableOpacity>
+        
 
         <TouchableOpacity 
           style={styles.bottomBarItem} 
@@ -524,18 +513,24 @@ const styles = StyleSheet.create({
   },
 
   textInput: {
-    fontSize: 15,
-    lineHeight: 22,
-    minHeight: 100,
+    fontSize: 16,
+    lineHeight: 24,
+    padding: 12,
+    minHeight: 200,
     textAlignVertical: 'top',
+    borderRadius: 8,
   },
   lightTextInput: {
     backgroundColor: '#f9f9f9',
     color: '#1f2937',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
   },
   darkTextInput: {
-    backgroundColor: '#3c3c3c',
+    backgroundColor: '#2c2c2c',
     color: '#f0f0f0',
+    borderColor: '#3c3c3c',
+    borderWidth: 1,
   },
 
   // Modal styles

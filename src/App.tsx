@@ -27,18 +27,18 @@ const App: React.FC = () => {
   }, []);
 
   // **2) Listen for Auth State changes (this ensures 'stay logged in')**
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log('User is logged in:', user);
-        setFirebaseUser(user);
-      } else {
-        console.log('No user is logged in');
-        setFirebaseUser(null);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  // useEffect(() => {
+  //   const unsubscribe = onAuthStateChanged(auth, (user) => {
+  //     if (user) {
+  //       console.log('User is logged in:', user);
+  //       setFirebaseUser(user);
+  //     } else {
+  //       console.log('No user is logged in');
+  //       setFirebaseUser(null);
+  //     }
+  //   });
+  //   return () => unsubscribe();
+  // }, []);
 
   // **3) Handle Login**
   const handleLogin = async (email: string, password: string) => {
@@ -83,6 +83,7 @@ const App: React.FC = () => {
       type,
       status: 'completed',
       uri,
+      text,
     };
     setScanHistory(prev => [newScan, ...prev]);
     setSelectedScan(newScan);
@@ -163,9 +164,11 @@ const App: React.FC = () => {
             <TouchableOpacity onPress={() => setCurrentScreen('history')} style={styles.navItem}>
               <Text style={styles.navText}>📄 Recent</Text>
             </TouchableOpacity>
+            {/* 
             <TouchableOpacity onPress={() => setCurrentScreen('profile')} style={styles.navItem}>
               <Text style={styles.navText}>👤 Profile</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> 
+            */}
           </View>
         )}
       </SafeAreaView>
